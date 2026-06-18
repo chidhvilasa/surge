@@ -356,5 +356,125 @@ $ npm ls -g playwright puppeteer                  -> empty
 ```
 **No headless browser tool was trivially available. Per the explicit instruction not to spend time installing one, skipping the automated smoke check entirely.** The actual page-load-and-click verification, the animations, and the gameplay feel all still need a real human looking at a real browser in the morning -- nothing above substitutes for that, it only proves the network plumbing between the two servers is correct.
 
+Stopped both verification servers afterward using their real listening-port PIDs (`taskkill //PID 4540 //F`, `taskkill //PID 11344 //F`), confirmed via `netstat` that both 8000 and 8080 are free again.
+
+---
+
+## Step 4: Final verification and safety pass
+
+### 4.1 Full test suite, one more time
+
+```
+$ python -m pytest backend/tests/ -v
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.0, pluggy-1.6.0 -- C:\Users\chidh\Downloads\Surge\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\chidh\Downloads\Surge
+plugins: anyio-4.14.0
+collecting ... collected 15 items
+
+backend/tests/test_agent.py::test_agent_only_picks_legal_moves PASSED    [  6%]
+backend/tests/test_agent.py::test_agent_completes_a_full_self_play_game PASSED [ 13%]
+backend/tests/test_agent.py::test_policy_save_and_load_roundtrip PASSED  [ 20%]
+backend/tests/test_api.py::test_start_game_returns_initial_state PASSED  [ 26%]
+backend/tests/test_api.py::test_get_game_state_matches_started_game PASSED [ 33%]
+backend/tests/test_api.py::test_submit_human_move_then_get_agent_move PASSED [ 40%]
+backend/tests/test_api.py::test_illegal_move_is_rejected PASSED          [ 46%]
+backend/tests/test_api.py::test_unknown_game_id_returns_404 PASSED       [ 53%]
+backend/tests/test_api.py::test_finished_game_via_api_updates_saved_policy_file PASSED [ 60%]
+backend/tests/test_rules_engine.py::test_normal_capture PASSED           [ 66%]
+backend/tests/test_rules_engine.py::test_illegal_own_piece_blocking PASSED [ 73%]
+backend/tests/test_rules_engine.py::test_surge_jump_over_occupied_intermediate PASSED [ 80%]
+backend/tests/test_rules_engine.py::test_exposed_capture_from_sideways_and_backward_directions PASSED [ 86%]
+backend/tests/test_rules_engine.py::test_one_surge_per_turn_limit PASSED [ 93%]
+backend/tests/test_rules_engine.py::test_no_legal_moves_loss_condition PASSED [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\chidh\Downloads\Surge\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================== 15 passed, 1 warning in 67.64s (0:01:07) ===================
+```
+All 15 still pass. The 67.64s runtime (vs. ~1s before Step 1) confirms the policy-load slowdown noted earlier is real and consistent, not a one-off.
+
+### 4.2 Secrets grep
+
+```
+$ grep -rn "api_key\|API_KEY\|sk-\|secret" . --exclude-dir=.venv --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=scripts/benchmark_snapshots
+./frontend/bun.lock:1144:    "unstorage": ["unstorage@2.0.0-alpha.7", "", { "peerDependencies": { ... "@azure/keyvault-secrets": "^4.10.0", ... } ...]
+```
+One hit, and it's a legitimate npm package name (`@azure/keyvault-secrets`, an optional peer dependency declaration inside the lockfile) -- not a real credential. Nothing else matched. Clean.
+
+### 4.3 Final staged-file check
+
+Re-staged everything (`git add -A .`) to pick up Step 3's changes, then re-checked:
+```
+$ git status   -> 114 "new file:" entries, all source/docs/config/small CSVs (full list in Step 2.4-style review, omitted here for length -- same categories, now also including the Step 3 frontend/backend edits)
+$ git diff --staged --stat | tail -3
+ scripts/benchmark_snapshots.py                   |  122 ++
+ scripts/train.py                                 |   10 +
+ 114 files changed, 10677 insertions(+)
+$ git status --short | grep -i "\.pkl\|node_modules\|\.venv\|benchmark_snapshots/"
+(empty)
+```
+Clean -- 114 files, ~10,677 lines, nothing matching the dangerous patterns.
+
+---
+
+## Step 5: Commit and push
+
+### 5.1 Committed locally
+
+```
+$ git commit -m "Surge: 5x6 board strategy game with a self-play MCTS opponent ..."
+[master (root-commit) 55fb0e4] Surge: 5x6 board strategy game with a self-play MCTS opponent
+ 114 files changed, 10677 insertions(+)
+```
+
+Confirmed no Claude/Anthropic co-author trailer anywhere, per explicit instruction:
+```
+$ git log -1 --format="Author: %an <%ae>%nCommitter: %cn <%ce>"
+Author: chidhvilasa yepuri <chidhvilasa2004@gmail.com>
+Committer: chidhvilasa yepuri <chidhvilasa2004@gmail.com>
+```
+
+### 5.2 No remote configured -- stopping here per the brief's explicit instruction
+
+```
+$ git remote -v
+(empty)
+$ gh --version
+/usr/bin/bash: line 7: gh: command not found
+```
+
+No GitHub remote exists for this repo, and the `gh` CLI isn't installed on this machine at all (confirmed earlier too, when checking the "is git already connected" claim). Per the brief: stopping here rather than guessing at credentials or creating a repo blindly. The commit itself is done and safe (local, reversible); pushing needs the repo name (visibility was already given as public) and a way to actually create it on GitHub, which requires the user's input/action -- asking now.
+
+---
+
+## Step 6: Final summary
+
+### Done, with real evidence (everything above is the actual command output, not a paraphrase)
+
+- **Policy promoted to production**: `snapshot_5000.pkl` copied over `backend/agent/policy_store/mcts_policy.pkl`, verified byte-identical via MD5, verified it loads to the correct table size (2,281,026 -- see the caveat below), verified a live `uvicorn` instance serves a fresh game correctly with it loaded.
+- **All 15 backend tests pass**, twice, after the policy swap and again after the frontend wiring changes.
+- **`.gitignore` set up and checked file-by-file before any `git add`**: no `.pkl`, no `node_modules/`, no `.venv/`, no `.claude/`, no benchmark snapshot directory staged. Also caught and excluded `.claude/` (local tool state) which wasn't in the original requested pattern list.
+- **Frontend connected to the real backend, not just flag-flipped**: found and fixed a genuine endpoint/contract mismatch in `client.ts` (wrong paths, wrong request bodies), found and fixed missing `MoveType`/`WinReason` values in the type system and the two label maps that branch on them, found and killed two orphaned dev-server processes left over from earlier in this session that were squatting on the ports needed for a clean test, then proved the connection mechanically with real `curl` output (CORS preflight + a real `POST /games`, both correct).
+- **Safety pass**: secrets grep came back clean (one false positive, an npm package name), staged file list double-checked twice and is 114 files / ~10,677 lines of source, docs, and small config/CSV files only.
+- **Committed locally** with no Claude/Anthropic co-author trailer, confirmed via `git log`.
+
+### Two honest problems found and documented, not smoothed over
+
+1. **`scripts/benchmark_snapshots.py` has a real logging-order bug**: it logs `table_size` *after* each chunk's evaluation games already mutated the table further, so every row in `scripts/benchmark_results.csv` overstates the actual size of the `.pkl` file it just saved. The snapshot_5000 file promoted to production really has 2,281,026 entries, not the 2,301,105 previously reported. The file itself is legitimate (verified by MD5 and reload) -- only the CSV's table_size column is wrong. Not fixed, since it wasn't asked for in this run.
+2. **The promoted policy makes every server/test-suite startup take ~70-85 seconds**, since `api/main.py` loads the full table at import time. This is a real operational cost of using the 5000-game policy in production, not previously visible with the old, much smaller policy file. Not fixed, since it wasn't asked for in this run -- but worth knowing before assuming the API is instantly responsive after a restart.
+
+### Still needs a manual check in the morning -- do not treat anything below as verified
+
+- **The actual gameplay and animations have not been seen by anyone.** No headless browser tool was trivially available (confirmed: `bunx playwright` had to download on demand, no chrome/chromium/msedge on PATH), and per the brief's instruction, no time was spent installing one. Everything verified above is network plumbing (CORS headers, a `POST /games` round trip) -- not a single pixel has been looked at.
+- **The win-reason and move-type label text is a placeholder, not a designed choice.** `back_row` -> "Breakthrough" and `no_legal_moves` -> "Stalemate" reuse the mock's old wording for the equivalent real concept, and `standard_capture`/`surge_capture` reuse their non-capture counterpart's label. Both are reasonable, unintrusive guesses to keep the type system honest and the build passing -- not vetted against how they actually look or read in the running UI.
+- **Whether the Surge-jump arc animation, the Exposed pulsing glow, the capture fade, and the win sequence actually render the way the original brief described** is entirely unverified. The frontend code was generated by Lovable and only checked for `tsc --noEmit` cleanliness and a successful dev-server boot here -- not for visual correctness.
+- **Pushing to GitHub did not happen.** No remote is configured, `gh` CLI isn't installed, and per the brief's explicit instruction this needs the user's input (repo name) and action (either creating an empty repo on github.com, or installing/authenticating `gh`) rather than a guess.
+
 ---
 
