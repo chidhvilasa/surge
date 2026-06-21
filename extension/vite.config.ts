@@ -19,6 +19,15 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "../frontend/src"),
+      // Files under frontend/src resolve bare "react"/"react-dom" imports
+      // by walking up from their own location to frontend/node_modules,
+      // while this folder's own entry (src/main.tsx) resolves the same
+      // bare imports to extension/node_modules -- two separate React
+      // instances in the same bundle, which breaks hooks ("Cannot read
+      // properties of null (reading 'useState')") since the dispatcher
+      // isn't shared. Force both import sites to the one copy.
+      react: path.resolve(__dirname, "node_modules/react"),
+      "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
     },
   },
   define: {
