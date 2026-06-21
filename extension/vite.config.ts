@@ -1,17 +1,35 @@
-// Placeholder build config -- NOT wired up, NOT installed, nothing
-// functional yet. This is scaffolding only, created ahead of actually
-// building the extension (a future, separate round of work).
-//
-// Plan: use the CRXJS Vite plugin (@crxjs/vite-plugin) to bundle this
-// manifest + a popup/side-panel React entry point that reuses the existing
-// React UI components from frontend/src/components/surge/ and the ported
-// rules engine/agent from frontend/src/lib/surge/engine/, via the same
-// client.ts swap-point pattern already used for the web app's mock/real
-// backend toggle -- here the swap point would select the in-browser
-// TypeScript engine instead of fetch() calls to localhost:8000.
-//
-// Deliberately not installing @crxjs/vite-plugin or any other dependency
-// yet -- that's wiring work for a future round once a human has reviewed
-// the ported engine/agent in this round.
+// Real build config -- CRXJS Vite plugin bundles manifest.json (rewriting
+// the background service worker's path to the built output automatically)
+// plus the React popup/tab entry point at index.html, which reuses the
+// existing React UI components from frontend/src/components/surge/ and the
+// ported rules engine/agent from frontend/src/lib/surge/engine/ directly --
+// no copies of either live under this folder. VITE_SURGE_MODE=local makes
+// client.ts (the same swap-point already used for the web app's mock/real
+// backend toggle) route every call to the in-browser TypeScript engine
+// instead of fetch() calls to a backend, since there is no backend here.
+import path from "path";
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import { crx } from "@crxjs/vite-plugin";
+import manifest from "./manifest.json";
 
-export default {};
+export default defineConfig({
+  plugins: [react(), tailwindcss(), crx({ manifest })],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "../frontend/src"),
+    },
+  },
+  define: {
+    "import.meta.env.VITE_SURGE_MODE": JSON.stringify("local"),
+  },
+  build: {
+    outDir: "dist",
+    rollupOptions: {
+      input: {
+        index: path.resolve(__dirname, "index.html"),
+      },
+    },
+  },
+});

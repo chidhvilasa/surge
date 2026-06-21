@@ -12,8 +12,11 @@ import {
 } from "@/lib/surge/client";
 import type { GameState, Move, Player, Pos } from "@/lib/surge/types";
 import { samePos } from "@/lib/surge/types";
+import { loadStats, recordResult, type SurgeStats } from "@/lib/surge/stats";
 import { Board, type PieceRecord } from "./Board";
 import { Readout } from "./Readout";
+import { RulesOverlay } from "./RulesOverlay";
+import { StatsReadout } from "./StatsReadout";
 import { WinBanner } from "./WinBanner";
 
 function piecesFromBoard(board: GameState["board"]): PieceRecord[] {
@@ -63,6 +66,15 @@ export function SurgeGame() {
   >(null);
   const [initialOrchestrated, setInitialOrchestrated] = useState(false);
   const trailKey = useRef(0);
+  const [stats, setStats] = useState<SurgeStats | null>(null);
+  // Per-game_id guard so a finished game's result is recorded exactly once,
+  // even across re-renders -- the same bug class the backend's
+  // record_finished_game() guards against with recorded_games.
+  const recordedGameIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    void loadStats().then(setStats);
+  }, []);
 
   const start = useCallback(async () => {
     setSelectedFrom(null);
@@ -152,6 +164,17 @@ export function SurgeGame() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.current_player, state?.winner, state?.game_id]);
 
+  // Stats recorder: fires once per finished game_id, regardless of mode
+  // ("local" mode's own agent-table persistence in client.ts is a separate
+  // concern -- this is purely win/loss bookkeeping for the human).
+  useEffect(() => {
+    if (!state) return;
+    if (state.winner === null) return;
+    if (recordedGameIds.current.has(state.game_id)) return;
+    recordedGameIds.current.add(state.game_id);
+    void recordResult(state.winner).then(setStats);
+  }, [state?.winner, state?.game_id]);
+
   if (!state) {
     return (
       <div
@@ -190,22 +213,31 @@ export function SurgeGame() {
         >
           Surge
         </h1>
-        <span
-          style={{
-            fontFamily: "var(--font-mono-display)",
-            fontSize: 10,
-            letterSpacing: "0.18em",
-            color: "rgba(255,255,255,0.35)",
-            textTransform: "uppercase",
-          }}
-        >
-          You · A
-        </span>
+        <div className="flex items-center gap-3">
+          <span
+            style={{
+              fontFamily: "var(--font-mono-display)",
+              fontSize: 10,
+              letterSpacing: "0.18em",
+              color: "rgba(255,255,255,0.35)",
+              textTransform: "uppercase",
+            }}
+          >
+            You · A
+          </span>
+          <RulesOverlay />
+        </div>
       </header>
 
       <div className="w-full max-w-[420px]">
         <Readout state={state} isAgentThinking={isAgentThinking} />
       </div>
+
+      {stats && (
+        <div className="w-full max-w-[420px]">
+          <StatsReadout stats={stats} />
+        </div>
+      )}
 
       <div className="relative">
         <Board
