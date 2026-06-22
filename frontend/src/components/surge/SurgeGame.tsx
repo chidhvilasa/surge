@@ -1,6 +1,6 @@
 // Surge — top-level game container.
-// Player A is always the human, Player B is always the agent.
-// All game logic lives in src/lib/surge/mock.ts (rules + agent).
+// vs_ai mode: Player A is the human, Player B is the agent.
+// hotseat mode: both A and B are human, sharing this device.
 // UI never computes legality or wins — it reads legal_moves / winner / exposed
 // from GameState.
 
@@ -10,10 +10,14 @@ import {
   requestAgentMove,
   submitMove,
 } from "@/lib/surge/client";
-import type { GameState, Move, Player, Pos } from "@/lib/surge/types";
+import { loadStats, recordResult, type SurgeStats } from "@/lib/surge/stats";
+import type { Difficulty, GameMode, GameState, Move, Player, Pos } from "@/lib/surge/types";
 import { samePos } from "@/lib/surge/types";
 import { Board, type PieceRecord } from "./Board";
+import { HandoffOverlay } from "./HandoffOverlay";
 import { Readout } from "./Readout";
+import { SetupScreen } from "./SetupScreen";
+import { StatsReadout } from "./StatsReadout";
 import { WinBanner } from "./WinBanner";
 
 function piecesFromBoard(board: GameState["board"]): PieceRecord[] {
@@ -42,45 +46,52 @@ function applyMoveToPieces(
         : "standard";
   for (const p of pieces) {
     if (samePos(p.pos, move.from_pos)) {
-      next.push({ ...p, pos: move.to_pos, anim });
+      next.push({ ...p, pos: move.to_pos, anim, fromPos: move.from_pos });
     } else if (samePos(p.pos, move.to_pos)) {
       captured.push({ ...p });
     } else {
-      next.push({ ...p, anim: "idle" });
+      next.push({ ...p, anim: "idle", fromPos: undefined });
     }
   }
   return { next, captured };
 }
 
 export function SurgeGame() {
+  const [mode, setMode] = useState<GameMode | null>(null);
+  const [difficulty, setDifficulty] = useState<Difficulty>("hard");
   const [state, setState] = useState<GameState | null>(null);
   const [pieces, setPieces] = useState<PieceRecord[]>([]);
   const [captured, setCaptured] = useState<PieceRecord[]>([]);
   const [selectedFrom, setSelectedFrom] = useState<Pos | null>(null);
   const [isAgentThinking, setIsAgentThinking] = useState(false);
+  const [awaitingHandoff, setAwaitingHandoff] = useState(false);
   const [surgeTrail, setSurgeTrail] = useState<
     { from: Pos; to: Pos; key: number } | null
   >(null);
   const [initialOrchestrated, setInitialOrchestrated] = useState(false);
   const trailKey = useRef(0);
+  const [stats, setStats] = useState<SurgeStats>(() => loadStats());
+  // Per-game_id guard so a finished game's result is recorded exactly once,
+  // even across re-renders -- the same bug class the backend's
+  // record_finished_game() guards against with recorded_games.
+  const recordedGameIds = useRef<Set<string>>(new Set());
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (nextMode: GameMode, nextDifficulty: Difficulty) => {
+    setMode(nextMode);
+    setDifficulty(nextDifficulty);
     setSelectedFrom(null);
     setCaptured([]);
     setSurgeTrail(null);
     setIsAgentThinking(false);
+    setAwaitingHandoff(false);
     setInitialOrchestrated(true);
-    const s = await createGame();
+    const s = await createGame(nextDifficulty);
     setState(s);
     setPieces(piecesFromBoard(s.board));
     // Let the staggered settle play, then disable orchestration so subsequent
     // updates are smooth.
     setTimeout(() => setInitialOrchestrated(false), 600);
   }, []);
-
-  useEffect(() => {
-    void start();
-  }, [start]);
 
   const animateMove = useCallback(
     (prevPieces: PieceRecord[], move: Move) => {
@@ -114,17 +125,25 @@ export function SurgeGame() {
       try {
         const next = await submitMove(state.game_id, move);
         setState(next);
+        // Hotseat: the device physically changes hands every turn, not
+        // just at game start -- require an explicit handoff confirmation
+        // before the next player's pieces/position are visible.
+        if (mode === "hotseat" && next.winner === null) {
+          setAwaitingHandoff(true);
+        }
       } catch (e) {
         console.error(e);
         // Roll back: refetch state by replaying pieces from authoritative state.
         if (state) setPieces(piecesFromBoard(state.board));
       }
     },
-    [state, pieces, animateMove],
+    [state, pieces, animateMove, mode],
   );
 
-  // Agent turn driver
+  // Agent turn driver -- vs_ai only. In hotseat both sides are human, so
+  // /agent-move must never be called for either side.
   useEffect(() => {
+    if (mode !== "vs_ai") return;
     if (!state) return;
     if (state.winner !== null) return;
     if (state.current_player !== "B") return;
@@ -150,7 +169,23 @@ export function SurgeGame() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.current_player, state?.winner, state?.game_id]);
+  }, [mode, state?.current_player, state?.winner, state?.game_id]);
+
+  // Stats recorder: fires once per finished game_id, vs_ai only -- hotseat
+  // has no human-vs-agent side to attribute a win/loss to, so it must stay
+  // entirely out of this tracker rather than recording something meaningless.
+  useEffect(() => {
+    if (mode !== "vs_ai") return;
+    if (!state) return;
+    if (state.winner === null) return;
+    if (recordedGameIds.current.has(state.game_id)) return;
+    recordedGameIds.current.add(state.game_id);
+    setStats(recordResult(state.winner));
+  }, [mode, state?.winner, state?.game_id]);
+
+  if (mode === null) {
+    return <SetupScreen onStart={(m, d) => void start(m, d)} />;
+  }
 
   if (!state) {
     return (
@@ -169,8 +204,11 @@ export function SurgeGame() {
     );
   }
 
+  const localPlayers: Player[] = mode === "hotseat" ? ["A", "B"] : ["A"];
   const disabled =
-    isAgentThinking || state.current_player !== "A" || state.winner !== null;
+    state.winner !== null ||
+    awaitingHandoff ||
+    (mode === "vs_ai" && (isAgentThinking || state.current_player !== "A"));
 
   return (
     <div
@@ -199,12 +237,13 @@ export function SurgeGame() {
             textTransform: "uppercase",
           }}
         >
-          You · A
+          {mode === "hotseat" ? "Local 2-player" : "You · A"}
         </span>
       </header>
 
       <div className="w-full max-w-[420px]">
-        <Readout state={state} isAgentThinking={isAgentThinking} />
+        <Readout state={state} isAgentThinking={isAgentThinking} mode={mode} />
+        {mode === "vs_ai" && <StatsReadout stats={stats} />}
       </div>
 
       <div className="relative">
@@ -216,14 +255,22 @@ export function SurgeGame() {
           onSelect={setSelectedFrom}
           onCommit={onCommit}
           disabled={disabled}
+          isAgentThinking={isAgentThinking}
           surgeTrail={surgeTrail}
           initialOrchestrated={initialOrchestrated}
+          localPlayers={localPlayers}
         />
+        {awaitingHandoff && state.winner === null && (
+          <HandoffOverlay
+            nextPlayer={state.current_player}
+            onReady={() => setAwaitingHandoff(false)}
+          />
+        )}
         {state.winner !== null && (
           <WinBanner
             winner={state.winner as Player}
             reason={state.win_reason}
-            onNewGame={() => void start()}
+            onNewGame={() => void start(mode, difficulty)}
           />
         )}
       </div>

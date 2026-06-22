@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { GameState, Move, MoveType, Pos } from "@/lib/surge/types";
+import type { GameState, Move, MoveType, Player, Pos } from "@/lib/surge/types";
 import { COLS, ROWS, isExposed, samePos } from "@/lib/surge/types";
 import { Piece, type PieceAnim } from "./Piece";
 import { SurgeTrail } from "./SurgeTrail";
@@ -12,6 +12,10 @@ export type PieceRecord = {
   owner: "A" | "B";
   pos: Pos;
   anim: PieceAnim;
+  // Set only on the piece that just moved, to the board position it moved
+  // from -- lets the Surge arc compute its mid-flight lift relative to the
+  // move's actual literal start and end, not just an offset from one end.
+  fromPos?: Pos;
 };
 
 export function Board({
@@ -22,8 +26,10 @@ export function Board({
   onSelect,
   onCommit,
   disabled,
+  isAgentThinking,
   surgeTrail,
   initialOrchestrated,
+  localPlayers,
 }: {
   state: GameState;
   pieces: PieceRecord[];
@@ -32,14 +38,34 @@ export function Board({
   onSelect: (pos: Pos | null) => void;
   onCommit: (move: Move) => void;
   disabled: boolean;
+  isAgentThinking: boolean;
   surgeTrail: { from: Pos; to: Pos; key: number } | null;
   initialOrchestrated: boolean;
+  // Which side(s) the local device may select pieces for: ["A"] in vs-AI
+  // mode, ["A", "B"] in hotseat (both players share this device).
+  localPlayers: Player[];
 }) {
   const reduced = usePrefersReducedMotion();
   const [cell, setCell] = useState(64);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [focus, setFocus] = useState<Pos>([0, 0]);
+  // null until the player actually interacts (click or keyboard) -- a
+  // fresh game must render with zero highlights, including the focus ring.
+  const [focus, setFocus] = useState<Pos | null>(null);
   const [hoverPos, setHoverPos] = useState<Pos | null>(null);
+
+  // A new game_id means a brand new game: any focus/hover left over from a
+  // previous game (or the very first mount) must not carry over.
+  useEffect(() => {
+    setFocus(null);
+    setHoverPos(null);
+  }, [state.game_id]);
+
+  // Visual orientation: B renders at the top, A at the bottom, so the
+  // human's own pieces sit closest to them. board[0]=A / board[5]=B in the
+  // underlying data never changes -- this is a pure display-coordinate
+  // transform. It's its own inverse (a vertical mirror), so the same
+  // function converts board-row -> visual-row and visual-row -> board-row.
+  const flipRow = (r: number) => ROWS - 1 - r;
 
   useEffect(() => {
     function recompute() {
@@ -75,10 +101,10 @@ export function Board({
   // Can-select set (own pieces with at least one legal move starting there)
   const canSelect = useMemo(() => {
     const s = new Set<string>();
-    if (state.current_player !== "A" || state.winner) return s;
+    if (!localPlayers.includes(state.current_player) || state.winner) return s;
     for (const m of state.legal_moves) s.add(`${m.from_pos[0]},${m.from_pos[1]}`);
     return s;
-  }, [state.legal_moves, state.current_player, state.winner]);
+  }, [state.legal_moves, state.current_player, state.winner, localPlayers]);
 
   function handleCellClick(r: number, c: number) {
     if (disabled) return;
@@ -97,21 +123,22 @@ export function Board({
 
   function handleKey(e: React.KeyboardEvent) {
     if (disabled) return;
-    let [r, c] = focus;
-    if (e.key === "ArrowUp") r = Math.max(0, r - 1);
-    else if (e.key === "ArrowDown") r = Math.min(ROWS - 1, r + 1);
-    else if (e.key === "ArrowLeft") c = Math.max(0, c - 1);
-    else if (e.key === "ArrowRight") c = Math.min(COLS - 1, c + 1);
-    else if (e.key === "Enter" || e.key === " ") {
+    if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      handleCellClick(focus[0], focus[1]);
+      if (focus) handleCellClick(focus[0], focus[1]);
       return;
     } else if (e.key === "Escape") {
       onSelect(null);
       return;
-    } else {
-      return;
     }
+    let [r, c] = focus ?? [0, 0];
+    // B (high r) renders visually on top now, so ArrowUp moves toward
+    // higher r and ArrowDown toward lower r -- the reverse of board-row order.
+    if (e.key === "ArrowUp") r = Math.min(ROWS - 1, r + 1);
+    else if (e.key === "ArrowDown") r = Math.max(0, r - 1);
+    else if (e.key === "ArrowLeft") c = Math.max(0, c - 1);
+    else if (e.key === "ArrowRight") c = Math.min(COLS - 1, c + 1);
+    else return;
     e.preventDefault();
     setFocus([r, c]);
     setHoverPos([r, c]);
@@ -136,8 +163,19 @@ export function Board({
             "inset 0 0 0 1px rgba(255,255,255,0.04), 0 8px 30px rgba(0,0,0,0.45)",
           padding: 0,
           pointerEvents: disabled ? "none" : "auto",
-          opacity: disabled ? 0.92 : 1,
-          transition: "opacity 180ms ease",
+          // Agent-thinking gets a clearly visible dim (not the barely-there
+          // 0.92 used for the other disabled states like winner/handoff) --
+          // a wait that visibly reads as "something is happening."
+          opacity: isAgentThinking ? 0.62 : disabled ? 0.92 : 1,
+          transition: "opacity 180ms ease, transform 180ms ease",
+          // 3D tilt: a real CSS perspective+rotateX transform, not a 2D skew
+          // or manual per-cell offset. Click hit-testing, the flipRow
+          // orientation logic, legal-move highlights, and piece animations
+          // are all untouched -- they operate in this element's own
+          // (untransformed) local coordinate space; the browser's native
+          // hit-testing maps tilted screen clicks back through the
+          // transform automatically. To revert: delete this one line.
+          transform: "perspective(1200px) rotateX(15deg)",
         }}
         aria-label="Surge board, 5 columns by 6 rows"
         role="grid"
@@ -151,10 +189,12 @@ export function Board({
           }}
         >
           {Array.from({ length: ROWS * COLS }).map((_, idx) => {
-            const r = Math.floor(idx / COLS);
+            // idx walks the grid in visual order (top-left to bottom-right);
+            // flipRow converts that visual slot to the real board row.
+            const r = flipRow(Math.floor(idx / COLS));
             const c = idx % COLS;
             const key = `${r},${c}`;
-            const isFocus = focus[0] === r && focus[1] === c;
+            const isFocus = focus !== null && focus[0] === r && focus[1] === c;
             const isSelected = selectedFrom && samePos(selectedFrom, [r, c]);
             const target = targetMap.get(key);
             const isLightSquare = (r + c) % 2 === 0;
@@ -214,8 +254,8 @@ export function Board({
           {surgeTrail && (
             <SurgeTrail
               key={surgeTrail.key}
-              from={surgeTrail.from}
-              to={surgeTrail.to}
+              from={[flipRow(surgeTrail.from[0]), surgeTrail.from[1]]}
+              to={[flipRow(surgeTrail.to[0]), surgeTrail.to[1]]}
               cell={cell}
               visible
             />
@@ -229,8 +269,9 @@ export function Board({
               <Piece
                 key={p.id}
                 owner={p.owner}
-                row={p.pos[0]}
+                row={flipRow(p.pos[0])}
                 col={p.pos[1]}
+                fromRow={p.fromPos ? flipRow(p.fromPos[0]) : undefined}
                 cell={cell}
                 exposed={isExposed(state, p.pos)}
                 anim={p.anim}
@@ -243,7 +284,7 @@ export function Board({
           {/* Captured pieces fading out */}
           <AnimatePresence>
             {capturedThisTurn.map((p) => (
-              <CapturedFade key={`cap-${p.id}`} owner={p.owner} row={p.pos[0]} col={p.pos[1]} cell={cell} />
+              <CapturedFade key={`cap-${p.id}`} owner={p.owner} row={flipRow(p.pos[0])} col={p.pos[1]} cell={cell} />
             ))}
           </AnimatePresence>
         </div>
@@ -309,7 +350,9 @@ function CapturedFade({
           style={{
             width: size,
             height: size,
-            background: `radial-gradient(circle at 35% 30%, ${color}ee, ${color}aa 60%, ${color}66 100%)`,
+            // See Piece.tsx for why this can't be `${color}ee` etc. -- var()
+            // doesn't accept a directly-appended alpha hex suffix.
+            background: `radial-gradient(circle at 35% 30%, color-mix(in srgb, ${color} 93%, transparent), color-mix(in srgb, ${color} 67%, transparent) 60%, color-mix(in srgb, ${color} 40%, transparent) 100%)`,
           }}
         />
       </div>

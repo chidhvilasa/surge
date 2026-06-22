@@ -1,6 +1,8 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
+
+Difficulty = Literal["easy", "medium", "hard"]
 
 
 class MoveOption(BaseModel):
@@ -24,6 +26,11 @@ class GameStateOut(BaseModel):
     win_reason: Optional[str]
     turn_number: int
     legal_moves: list[MoveOption]
+    difficulty: Difficulty
+
+
+class StartGameIn(BaseModel):
+    difficulty: Difficulty = "hard"
 
 
 class MoveIn(BaseModel):

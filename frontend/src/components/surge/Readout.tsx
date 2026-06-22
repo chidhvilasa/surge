@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { GameState, Player } from "@/lib/surge/types";
+import type { GameMode, GameState, Player } from "@/lib/surge/types";
+import { RulesOverlay } from "./RulesOverlay";
+
+const DIFFICULTY_LABEL: Record<GameState["difficulty"], string> = {
+  easy: "Easy",
+  medium: "Medium",
+  hard: "Hard",
+};
 
 function Pips({
   player,
@@ -47,9 +54,11 @@ function Pips({
 export function Readout({
   state,
   isAgentThinking,
+  mode,
 }: {
   state: GameState;
   isAgentThinking: boolean;
+  mode: GameMode;
 }) {
   const prev = useRef<{ A: number; B: number }>(state.surge_tokens);
   const [flickerA, setFlickerA] = useState(0);
@@ -64,9 +73,11 @@ export function Readout({
   const turnLabel =
     state.winner !== null
       ? `Winner: ${state.winner}`
-      : state.current_player === "A"
-        ? "Your turn"
-        : "Agent";
+      : mode === "hotseat"
+        ? `Player ${state.current_player}`
+        : state.current_player === "A"
+          ? "Your turn"
+          : "Agent";
 
   return (
     <div
@@ -79,9 +90,34 @@ export function Readout({
         letterSpacing: "0.04em",
       }}
     >
-      <div className="flex items-center gap-2">
-        <span style={{ color: "rgba(255,255,255,0.4)" }}>TURN</span>
-        <span>{turnLabel}</span>
+      <div className="flex items-center gap-3">
+        <motion.div
+          className="flex items-center gap-3"
+          animate={
+            isAgentThinking
+              ? { opacity: [1, 0.65, 1] }
+              : { opacity: 1 }
+          }
+          transition={
+            isAgentThinking
+              ? { duration: 1.3, repeat: Infinity, ease: "easeInOut" }
+              : { duration: 0.15 }
+          }
+          style={
+            isAgentThinking
+              ? { filter: "drop-shadow(0 0 5px var(--color-player-b))" }
+              : undefined
+          }
+        >
+          <span style={{ color: "rgba(255,255,255,0.4)" }}>TURN</span>{" "}
+          <span>{turnLabel}</span>
+          {mode === "vs_ai" && (
+            <span style={{ color: "rgba(255,255,255,0.32)" }}>
+              &middot; {DIFFICULTY_LABEL[state.difficulty]}
+            </span>
+          )}
+        </motion.div>
+        <RulesOverlay />
       </div>
 
       <div className="flex items-center gap-4">
@@ -101,9 +137,8 @@ export function Readout({
             <motion.span
               key="thinking"
               initial={{ opacity: 0 }}
-              animate={{ opacity: [0.4, 1, 0.4] }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 1.2, repeat: Infinity }}
+              animate={{ opacity: [0.4, 1, 0.4], transition: { duration: 1.2, repeat: Infinity } }}
+              exit={{ opacity: 0, transition: { duration: 0.2, repeat: 0 } }}
             >
               Agent thinking…
             </motion.span>

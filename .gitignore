@@ -16,3 +16,4 @@ build/
 backend/agent/policy_store/*.pkl
 !backend/agent/policy_store/.gitkeep
 scripts/benchmark_snapshots/
+backend/logs/

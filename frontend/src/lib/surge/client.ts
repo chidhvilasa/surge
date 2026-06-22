@@ -12,16 +12,20 @@ import {
   mockRequestAgentMove,
   mockSubmitMove,
 } from "./mock";
-import type { GameState, Move } from "./types";
+import type { Difficulty, GameState, Move } from "./types";
 
 const USE_MOCK = false;
 const API_BASE_URL =
   (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
     ?.VITE_SURGE_API_BASE_URL ?? "http://localhost:8000";
 
-export async function createGame(): Promise<GameState> {
-  if (USE_MOCK) return mockCreateGame();
-  const res = await fetch(`${API_BASE_URL}/games`, { method: "POST" });
+export async function createGame(difficulty: Difficulty = "hard"): Promise<GameState> {
+  if (USE_MOCK) return mockCreateGame(difficulty);
+  const res = await fetch(`${API_BASE_URL}/games`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ difficulty }),
+  });
   if (!res.ok) throw new Error(`createGame failed: ${res.status}`);
   return extractState(await res.json(), "create").state;
 }

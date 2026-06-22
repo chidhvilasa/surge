@@ -53,6 +53,29 @@ large and machine-specific). To regenerate it from scratch:
 python backend/agent/train_self_play.py --games 5000 --simulations 200 --save-every 500
 ```
 
+### Difficulty tiers need two more policy files -- these are NOT disposable
+
+`backend/agent/policy_store/easy_policy.pkl` and `medium_policy.pkl` are
+required at server startup for the Easy/Medium difficulty tiers (see
+`backend/api/main.py`). The server raises a `RuntimeError` and refuses to
+start if either is missing. Despite sitting next to `mcts_policy.pkl` and
+coming from the same training run, **do not treat these as throwaway
+benchmark output** -- `scripts/benchmark_snapshots/` is for disposable
+snapshots; these two specific files were promoted out of that directory
+into permanent use as the Easy/Medium opponents.
+
+If they ever go missing, regenerate the full snapshot series and copy the
+right ones back in under these exact names:
+
+```bash
+python scripts/benchmark_snapshots.py --total-games 5000 --snapshot-every 500 --simulations 200
+cp scripts/benchmark_snapshots/snapshot_500.pkl backend/agent/policy_store/easy_policy.pkl
+cp scripts/benchmark_snapshots/snapshot_2000.pkl backend/agent/policy_store/medium_policy.pkl
+```
+
+Like `mcts_policy.pkl`, both are gitignored (large, machine-specific) -- not
+checked into git, but required on disk for the server to run.
+
 ## Run the API
 
 ```bash

@@ -8,6 +8,7 @@ export function Piece({
   owner,
   row,
   col,
+  fromRow,
   cell,
   exposed,
   anim,
@@ -18,6 +19,11 @@ export function Piece({
   owner: Player;
   row: number;
   col: number;
+  // Visual (post-flip) row this piece moved from, set only on the piece
+  // that just played a Surge. Needed because the lift below must be
+  // computed relative to the move's actual start and end, not just an
+  // offset from the destination -- see the comment by `animateY`.
+  fromRow?: number;
   cell: number;
   exposed: boolean;
   anim: PieceAnim;
@@ -33,10 +39,25 @@ export function Piece({
 
   // Spring configs
   const standardSpring = { type: "spring" as const, stiffness: 180, damping: 22 };
-  const surgeSpring = { type: "spring" as const, stiffness: 340, damping: 16 };
+  // The surge arc animates y through 3 keyframes ([y, y - lift, y]); spring/inertia
+  // transitions only support exactly 2 keyframes, so this must be a tween.
+  const surgeTransition = { type: "tween" as const, duration: 0.32, ease: "easeInOut" as const };
 
-  // Arc for surge: lift slightly mid-flight via keyframes on y.
-  const animateY = anim === "surge" && !reduced ? [y, y - cell * 0.35, y] : y;
+  // Arc for surge: lift slightly mid-flight via keyframes on y. Framer
+  // Motion treats this 3-element array as literal articulation points
+  // (current visual position -> y -> dip -> y), so for the dip to be a
+  // genuine extremum -- smaller than *both* the start and the end, not
+  // just offset from one of them -- it must subtract the lift from
+  // whichever of the two real endpoints is already smaller (closer to the
+  // top of the screen). The old `y - lift` always used the destination
+  // alone, which happened to be the smaller endpoint for every move A
+  // plays (so it looked fine), but is the *larger* endpoint for every
+  // Surge B plays after the board flip, landing the "dip" inside the
+  // [from, to] range instead of below it -- a flat line, no visible arc.
+  // (A first attempt at this fix used the midpoint of the two endpoints,
+  // which is wrong too: it just relocates the same bug from B to A.)
+  const dipBase = fromRow !== undefined ? Math.min(fromRow * cell, y) : y;
+  const animateY = anim === "surge" && !reduced ? [y, dipBase - cell * 0.35, y] : y;
 
   return (
     <motion.div
@@ -69,7 +90,7 @@ export function Piece({
                 delay: (staggerIndex ?? 0) * 0.03,
               }
             : anim === "surge"
-              ? surgeSpring
+              ? surgeTransition
               : standardSpring
       }
     >
@@ -101,7 +122,13 @@ function PieceVisual({
         style={{
           width: size,
           height: size,
-          background: `radial-gradient(circle at 35% 30%, ${color}ee, ${color}aa 60%, ${color}66 100%)`,
+          // color is a var(...) reference -- appending hex alpha suffixes
+          // directly onto it (e.g. `${color}ee`) does not produce a valid
+          // 8-digit hex color in CSS; var(--x)ee tokenizes as the variable
+          // plus a stray separate ident, making the whole background
+          // declaration invalid and the piece render with no fill at all.
+          // color-mix() is the correct way to blend a var() with alpha.
+          background: `radial-gradient(circle at 35% 30%, color-mix(in srgb, ${color} 93%, transparent), color-mix(in srgb, ${color} 67%, transparent) 60%, color-mix(in srgb, ${color} 40%, transparent) 100%)`,
           boxShadow: winner
             ? "0 0 24px var(--color-victory), 0 0 8px var(--color-victory)"
             : exposed

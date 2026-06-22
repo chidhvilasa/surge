@@ -1,7 +1,10 @@
 // Surge — shared types.
-// Player A is always the human, Player B is always the agent.
+// In "vs_ai" mode, Player A is the human and Player B is the agent. In
+// "hotseat" mode both sides are human, sharing the same device.
 
 export type Player = "A" | "B";
+export type Difficulty = "easy" | "medium" | "hard";
+export type GameMode = "vs_ai" | "hotseat";
 export type Cell = Player | null;
 export type Board = Cell[][]; // 6 rows × 5 cols; row 0 = A's back rank, row 5 = B's back rank
 export type Pos = [number, number]; // [row, col]
@@ -20,12 +23,11 @@ export type Move = {
 
 export type Exposed = { pos: Pos; owner: Player } | null;
 
-// Real backend values (see backend/rules_engine/win_conditions.py): "back_row",
-// "elimination", "no_legal_moves". The mock generator (./mock.ts) and the
-// WinBanner/MoveTypeBadge label maps still use the older
-// "breakthrough"/"stalemate" naming -- not reconciled here, since picking the
-// actual display label/copy is a content decision, not a wiring fix.
-export type WinReason = "back_row" | "elimination" | "no_legal_moves" | "breakthrough" | "stalemate";
+// The exact three literal strings backend/rules_engine/moves.py assigns to
+// state.win_reason -- confirmed directly against that source, not assumed.
+// mock.ts produces the same three strings, so the mock and the real API are
+// interchangeable here.
+export type WinReason = "back_row" | "elimination" | "no_legal_moves";
 
 export type GameState = {
   game_id: string;
@@ -35,9 +37,8 @@ export type GameState = {
   exposed: Exposed;
   legal_moves: Move[];
   winner: Player | null;
-  // NOTE: win_reason values are unverified against the real backend (no game
-  // in testing has ended yet). Typed as-is; revisit once a real win occurs.
   win_reason?: WinReason;
+  difficulty: Difficulty;
 };
 
 export const ROWS = 6;

@@ -55,10 +55,17 @@ def play_one_game(agent_a: MCTSAgent, agent_b: MCTSAgent, agent_a_side: str, max
 
 
 def run_head_to_head(
-    policy_a: str, policy_b: str, games: int, simulations: int, max_turns: int, label_a: str, label_b: str
+    policy_a: str,
+    policy_b: str,
+    games: int,
+    simulations_a: int,
+    simulations_b: int,
+    max_turns: int,
+    label_a: str,
+    label_b: str,
 ) -> tuple[float, float]:
-    agent_a = load_agent(policy_a, simulations)
-    agent_b = load_agent(policy_b, simulations)
+    agent_a = load_agent(policy_a, simulations_a)
+    agent_b = load_agent(policy_b, simulations_b)
 
     wins_a = wins_b = undecided = 0
     for i in range(games):
@@ -71,7 +78,8 @@ def run_head_to_head(
         else:
             undecided += 1
 
-    print(f"{label_a} vs {label_b}: {games} games, {simulations} simulations/move each, sides alternated")
+    sims_desc = f"{simulations_a} sims" if simulations_a == simulations_b else f"{simulations_a} vs {simulations_b} sims"
+    print(f"{label_a} vs {label_b}: {games} games, {sims_desc}/move, sides alternated")
     print(f"  {label_a} win rate: {wins_a / games:.4f} ({wins_a}/{games})")
     print(f"  {label_b} win rate: {wins_b / games:.4f} ({wins_b}/{games})")
     if undecided:
@@ -81,20 +89,24 @@ def run_head_to_head(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Head-to-head benchmark between two MCTS policy snapshots")
+    parser = argparse.ArgumentParser(description="Head-to-head benchmark between two MCTS policy snapshots and/or simulation budgets")
     parser.add_argument("--policy-a", type=str, required=True, help=f"path to a snapshot .pkl, or '{EMPTY_SENTINEL}' for a blank-table agent")
     parser.add_argument("--policy-b", type=str, required=True, help=f"path to a snapshot .pkl, or '{EMPTY_SENTINEL}' for a blank-table agent")
     parser.add_argument("--label-a", type=str, default=None)
     parser.add_argument("--label-b", type=str, default=None)
     parser.add_argument("--games", type=int, default=200)
-    parser.add_argument("--simulations", type=int, default=200)
+    parser.add_argument("--simulations", type=int, default=200, help="shared simulation count for both sides, unless overridden below")
+    parser.add_argument("--simulations-a", type=int, default=None, help="overrides --simulations for side A only (e.g. comparing difficulty tiers)")
+    parser.add_argument("--simulations-b", type=int, default=None, help="overrides --simulations for side B only")
     parser.add_argument("--max-turns", type=int, default=300)
     args = parser.parse_args()
 
     label_a = args.label_a or args.policy_a
     label_b = args.label_b or args.policy_b
+    simulations_a = args.simulations_a if args.simulations_a is not None else args.simulations
+    simulations_b = args.simulations_b if args.simulations_b is not None else args.simulations
 
-    run_head_to_head(args.policy_a, args.policy_b, args.games, args.simulations, args.max_turns, label_a, label_b)
+    run_head_to_head(args.policy_a, args.policy_b, args.games, simulations_a, simulations_b, args.max_turns, label_a, label_b)
 
 
 if __name__ == "__main__":

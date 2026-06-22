@@ -51,6 +51,7 @@ function clone(s: InternalState): InternalState {
     current_player: s.current_player,
     surge_tokens: { ...s.surge_tokens },
     exposed: s.exposed ? { pos: [s.exposed.pos[0], s.exposed.pos[1]], owner: s.exposed.owner } : null,
+    difficulty: s.difficulty,
   };
 }
 
@@ -146,13 +147,15 @@ function generateLegalMoves(s: InternalState): Move[] {
 }
 
 function computeWinner(s: InternalState): { winner: Player | null; reason?: WinReason } {
-  if (reachedBackRank(s.board, "A")) return { winner: "A", reason: "breakthrough" };
-  if (reachedBackRank(s.board, "B")) return { winner: "B", reason: "breakthrough" };
+  // Reason strings match the real backend exactly (backend/rules_engine/moves.py)
+  // so the mock and the real API are interchangeable from the UI's perspective.
+  if (reachedBackRank(s.board, "A")) return { winner: "A", reason: "back_row" };
+  if (reachedBackRank(s.board, "B")) return { winner: "B", reason: "back_row" };
   if (countPieces(s.board, "A") === 0) return { winner: "B", reason: "elimination" };
   if (countPieces(s.board, "B") === 0) return { winner: "A", reason: "elimination" };
   const legal = generateLegalMoves(s);
   if (legal.length === 0) {
-    return { winner: enemyOf(s.current_player), reason: "stalemate" };
+    return { winner: enemyOf(s.current_player), reason: "no_legal_moves" };
   }
   return { winner: null };
 }
@@ -169,6 +172,7 @@ function toPublic(s: InternalState): GameState {
     legal_moves,
     winner,
     win_reason: reason,
+    difficulty: s.difficulty,
   };
 }
 
@@ -177,7 +181,7 @@ function delay(min: number, max: number): Promise<void> {
   return new Promise((res) => setTimeout(res, ms));
 }
 
-export async function mockCreateGame(): Promise<GameState> {
+export async function mockCreateGame(difficulty: GameState["difficulty"] = "hard"): Promise<GameState> {
   await delay(80, 180);
   const id = newGameId();
   const s: InternalState = {
@@ -186,6 +190,7 @@ export async function mockCreateGame(): Promise<GameState> {
     current_player: "A",
     surge_tokens: { A: 3, B: 3 },
     exposed: null,
+    difficulty,
   };
   store.set(id, s);
   return toPublic(s);
