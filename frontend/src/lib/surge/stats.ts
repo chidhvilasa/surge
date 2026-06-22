@@ -1,13 +1,13 @@
 // Single swap point for where win/loss stats are persisted, mirroring how
-// client.ts isolates its data source. Today: localStorage. Later (browser
-// extension): swap loadStats/saveStats to chrome.storage.local.get/set,
-// same STORAGE_KEY, same flat SurgeStats shape, same call sites in
-// SurgeGame.tsx -- only the storage calls' bodies change.
+// client.ts isolates its data source. Backing store is picked at runtime:
+// chrome.storage.local when running inside the extension (chrome.storage
+// exists), localStorage otherwise (the regular web app). Same STORAGE_KEY,
+// same flat SurgeStats shape, same call sites in SurgeGame.tsx -- only the
+// storage calls' bodies differ.
 //
-// One real wrinkle when that swap happens: chrome.storage.local's API is
-// async (callback/Promise-based) while localStorage is synchronous. The
-// call sites below would need to become async at that point; the data
-// shape itself doesn't need to change.
+// chrome.storage.local's API is Promise-based (Chrome 88+, well within
+// Manifest V3's minimum), so this module's exports are uniformly async even
+// though the localStorage path itself is synchronous under the hood.
 
 export type SurgeStats = {
   gamesPlayed: number;
@@ -25,10 +25,50 @@ const DEFAULT_STATS: SurgeStats = {
   currentStreak: { type: null, count: 0 },
 };
 
-export function loadStats(): SurgeStats {
+function hasChromeStorage(): boolean {
+  return (
+    typeof chrome !== "undefined" &&
+    typeof chrome.storage !== "undefined" &&
+    typeof chrome.storage.local !== "undefined"
+  );
+}
+
+async function readRaw(): Promise<string | null> {
+  if (hasChromeStorage()) {
+    const result = await chrome.storage.local.get(STORAGE_KEY);
+    const value = result[STORAGE_KEY];
+    return typeof value === "string" ? value : null;
+  }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_STATS };
+    return localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+async function writeRaw(raw: string): Promise<void> {
+  if (hasChromeStorage()) {
+    try {
+      await chrome.storage.local.set({ [STORAGE_KEY]: raw });
+    } catch (e) {
+      // Quota exceeded or storage otherwise unavailable -- stats just
+      // won't persist this session, not a crash.
+      console.warn("Surge: failed to save stats to chrome.storage.local", e);
+    }
+    return;
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY, raw);
+  } catch {
+    // localStorage unavailable (private mode, quota, etc.) -- stats just
+    // won't persist this session, not a crash.
+  }
+}
+
+export async function loadStats(): Promise<SurgeStats> {
+  const raw = await readRaw();
+  if (!raw) return { ...DEFAULT_STATS };
+  try {
     const parsed = JSON.parse(raw) as Partial<SurgeStats>;
     return {
       gamesPlayed: parsed.gamesPlayed ?? 0,
@@ -41,22 +81,13 @@ export function loadStats(): SurgeStats {
   }
 }
 
-function saveStats(stats: SurgeStats): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
-  } catch {
-    // localStorage unavailable (private mode, quota, etc.) -- stats just
-    // won't persist this session, not a crash.
-  }
-}
-
 // Records one finished human-vs-agent game's result and returns the updated
 // stats. `winner` is "A" (human) or "B" (agent). Call this exactly once per
 // finished game_id -- the caller (SurgeGame.tsx) is responsible for the
 // already-recorded guard, the same bug class the backend's
 // record_finished_game() guards against for the same reason.
-export function recordResult(winner: "A" | "B"): SurgeStats {
-  const stats = loadStats();
+export async function recordResult(winner: "A" | "B"): Promise<SurgeStats> {
+  const stats = await loadStats();
   const result: "win" | "loss" = winner === "A" ? "win" : "loss";
 
   const nextStreak =
@@ -70,6 +101,6 @@ export function recordResult(winner: "A" | "B"): SurgeStats {
     agentWins: stats.agentWins + (result === "loss" ? 1 : 0),
     currentStreak: nextStreak,
   };
-  saveStats(next);
+  await writeRaw(JSON.stringify(next));
   return next;
 }

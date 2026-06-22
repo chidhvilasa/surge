@@ -1,8 +1,43 @@
 # Surge
 
+[![Latest release](https://img.shields.io/github/v/release/chidhvilasa/surge?label=latest%20release)](https://github.com/chidhvilasa/surge/releases/latest)
+[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-coming%20soon-lightgrey)](#download)
+
 A 5x6 board strategy game with a self-improving AI opponent: a local Monte
 Carlo Tree Search (UCB1) agent trained entirely through self-play, with no
 external API calls or hosted services involved in any decision.
+
+![Surge running as a Chrome extension](docs/screenshot.png)
+
+## Download
+
+A Chrome extension build exists (see [`extension/`](extension/)) -- one
+single package, not separate builds per OS. It runs inside Chrome itself,
+not as native code, so the exact same file works identically on Windows,
+Mac, Linux, and ChromeOS.
+
+**Chrome Web Store** -- not live yet. Once published, this will be the
+one-click install: identical on any OS, no manual steps. This section will
+be updated with the real listing link the moment it's approved.
+
+**Manual install (available now)** -- download the built extension
+directly from the latest release and load it yourself:
+
+[![Download latest release](https://img.shields.io/github/v/release/chidhvilasa/surge?label=download&style=for-the-badge)](https://github.com/chidhvilasa/surge/releases/latest)
+
+This is a real manual install, not a one-click process -- Chrome blocks
+installing `.crx` files directly outside the Web Store by design, for
+security, so there's no smoother path around it today:
+
+1. Download `surge-extension-vX.Y.Z.zip` from the
+   [latest release](https://github.com/chidhvilasa/surge/releases/latest)
+   and unzip it
+2. Open `chrome://extensions` in Chrome
+3. Turn on **Developer mode** (toggle, top right of that page)
+4. Click **Load unpacked**
+5. Select the unzipped `surge-extension` folder
+
+Click the toolbar icon afterward to open the game in its own tab.
 
 Full rules: [docs/SURGE_GAME_SPEC.md](docs/SURGE_GAME_SPEC.md)
 Architecture notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

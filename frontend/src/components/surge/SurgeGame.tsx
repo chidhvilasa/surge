@@ -16,6 +16,7 @@ import { samePos } from "@/lib/surge/types";
 import { Board, type PieceRecord } from "./Board";
 import { HandoffOverlay } from "./HandoffOverlay";
 import { Readout } from "./Readout";
+import { RulesOverlay } from "./RulesOverlay";
 import { SetupScreen } from "./SetupScreen";
 import { StatsReadout } from "./StatsReadout";
 import { WinBanner } from "./WinBanner";
@@ -70,11 +71,15 @@ export function SurgeGame() {
   >(null);
   const [initialOrchestrated, setInitialOrchestrated] = useState(false);
   const trailKey = useRef(0);
-  const [stats, setStats] = useState<SurgeStats>(() => loadStats());
+  const [stats, setStats] = useState<SurgeStats | null>(null);
   // Per-game_id guard so a finished game's result is recorded exactly once,
   // even across re-renders -- the same bug class the backend's
   // record_finished_game() guards against with recorded_games.
   const recordedGameIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    void loadStats().then(setStats);
+  }, []);
 
   const start = useCallback(async (nextMode: GameMode, nextDifficulty: Difficulty) => {
     setMode(nextMode);
@@ -174,13 +179,15 @@ export function SurgeGame() {
   // Stats recorder: fires once per finished game_id, vs_ai only -- hotseat
   // has no human-vs-agent side to attribute a win/loss to, so it must stay
   // entirely out of this tracker rather than recording something meaningless.
+  // ("local" mode's own agent-table persistence in client.ts is a separate
+  // concern -- this is purely win/loss bookkeeping for the human.)
   useEffect(() => {
     if (mode !== "vs_ai") return;
     if (!state) return;
     if (state.winner === null) return;
     if (recordedGameIds.current.has(state.game_id)) return;
     recordedGameIds.current.add(state.game_id);
-    setStats(recordResult(state.winner));
+    void recordResult(state.winner).then(setStats);
   }, [mode, state?.winner, state?.game_id]);
 
   if (mode === null) {
@@ -228,23 +235,31 @@ export function SurgeGame() {
         >
           Surge
         </h1>
-        <span
-          style={{
-            fontFamily: "var(--font-mono-display)",
-            fontSize: 10,
-            letterSpacing: "0.18em",
-            color: "rgba(255,255,255,0.35)",
-            textTransform: "uppercase",
-          }}
-        >
-          {mode === "hotseat" ? "Local 2-player" : "You · A"}
-        </span>
+        <div className="flex items-center gap-3">
+          <span
+            style={{
+              fontFamily: "var(--font-mono-display)",
+              fontSize: 10,
+              letterSpacing: "0.18em",
+              color: "rgba(255,255,255,0.35)",
+              textTransform: "uppercase",
+            }}
+          >
+            {mode === "hotseat" ? "Local 2-player" : "You · A"}
+          </span>
+          <RulesOverlay />
+        </div>
       </header>
 
       <div className="w-full max-w-[420px]">
         <Readout state={state} isAgentThinking={isAgentThinking} mode={mode} />
-        {mode === "vs_ai" && <StatsReadout stats={stats} />}
       </div>
+
+      {mode === "vs_ai" && stats && (
+        <div className="w-full max-w-[420px]">
+          <StatsReadout stats={stats} />
+        </div>
+      )}
 
       <div className="relative">
         <Board
