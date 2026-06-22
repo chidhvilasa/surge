@@ -16,7 +16,6 @@ import { samePos } from "@/lib/surge/types";
 import { Board, type PieceRecord } from "./Board";
 import { HandoffOverlay } from "./HandoffOverlay";
 import { Readout } from "./Readout";
-import { RulesOverlay } from "./RulesOverlay";
 import { SetupScreen } from "./SetupScreen";
 import { StatsReadout } from "./StatsReadout";
 import { WinBanner } from "./WinBanner";
@@ -235,20 +234,17 @@ export function SurgeGame() {
         >
           Surge
         </h1>
-        <div className="flex items-center gap-3">
-          <span
-            style={{
-              fontFamily: "var(--font-mono-display)",
-              fontSize: 10,
-              letterSpacing: "0.18em",
-              color: "rgba(255,255,255,0.35)",
-              textTransform: "uppercase",
-            }}
-          >
-            {mode === "hotseat" ? "Local 2-player" : "You · A"}
-          </span>
-          <RulesOverlay />
-        </div>
+        <span
+          style={{
+            fontFamily: "var(--font-mono-display)",
+            fontSize: 10,
+            letterSpacing: "0.18em",
+            color: "rgba(255,255,255,0.35)",
+            textTransform: "uppercase",
+          }}
+        >
+          {mode === "hotseat" ? "Local 2-player" : "You · A"}
+        </span>
       </header>
 
       <div className="w-full max-w-[420px]">
