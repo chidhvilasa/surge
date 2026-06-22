@@ -59,6 +59,16 @@ class MCTSAgent:
         # state_key -> {action_key: [visit_count, total_value]}
         self.table: dict[StateKey, dict[ActionKey, list]] = {}
         self._loaded = False
+        # Guards self.table's *key-set* (not its values) against the
+        # background save path observing a size change mid-pickle: every
+        # write that adds/removes a top-level key (_backpropagate, unload)
+        # takes this lock briefly; snapshot_table() takes it just as
+        # briefly to copy the key-set before handing the copy to pickle,
+        # which then runs with no lock held at all. A real production
+        # crash (RuntimeError: dictionary changed size during iteration,
+        # in pickle.dump() while a concurrent search() was still adding
+        # newly-discovered states) is what this exists to prevent.
+        self._table_lock = threading.Lock()
         # lazy=True defers the actual pickle load (measured at multiple
         # seconds and, for the largest table, multiple GB of resident
         # memory) until ensure_loaded() is called -- used by the API layer
@@ -85,11 +95,34 @@ class MCTSAgent:
         arrange for it to actually be persisted -- this method intentionally
         does not save it itself, since a real measured save of the largest
         tier's table takes ~32s, far too long to make the request that
-        triggered a tier switch sit and wait for it."""
-        old_table = self.table
-        self.table = {}
+        triggered a tier switch sit and wait for it.
+
+        Takes _table_lock for the swap itself so a _backpropagate() call
+        that's mid-loop over several path entries can't have some entries
+        land in the table being handed off here and others land in the
+        fresh one that replaces it."""
+        with self._table_lock:
+            old_table = self.table
+            self.table = {}
         self._loaded = False
         return old_table
+
+    def snapshot_table(self) -> dict:
+        """A shallow copy of self.table's current key-set, taken under
+        _table_lock so the copy can't be mid-resized by a concurrent
+        _backpropagate() call. Hand this to pickle instead of the live
+        table: pickling the live table directly, while a concurrent
+        search() was still discovering new states, raised a real
+        production RuntimeError ("dictionary changed size during
+        iteration"). The copy is shallow -- the per-state inner dicts are
+        still the same objects the live table uses -- which is enough to
+        fix the *outer* dict's size changing mid-pickle (by far the common
+        case: nearly every simulation discovers some brand-new state),
+        though a concurrent call adding a brand-new action to an
+        already-visited state's inner dict during that same pickle remains
+        a narrower, unaddressed case."""
+        with self._table_lock:
+            return dict(self.table)
 
     def save(self, table: Optional[dict] = None) -> None:
         """Write `table` (default: self.table) to self.policy_path
@@ -178,18 +211,25 @@ class MCTSAgent:
         """Update visit count and value for every (state, action) edge in
         `path` given the eventual `winner`. Shared by self-play simulation
         rollouts and by real-game updates (update_from_trajectory) so both
-        use the exact same table update rule."""
-        for state_key, action_key, player in path:
-            node = self.table.setdefault(state_key, {})
-            stats = node.setdefault(action_key, [0, 0.0])
-            stats[0] += 1
-            if winner is None:
-                result = 0.0
-            elif winner == player:
-                result = 1.0
-            else:
-                result = -1.0
-            stats[1] += result
+        use the exact same table update rule.
+
+        Holds _table_lock for the whole loop (not per-entry) -- `path` is
+        bounded by rollout_depth_cap and typically much shorter in
+        practice, so this is brief regardless, and a single acquisition
+        also guarantees every entry in one simulation's path lands
+        together rather than split across a concurrent unload() swap."""
+        with self._table_lock:
+            for state_key, action_key, player in path:
+                node = self.table.setdefault(state_key, {})
+                stats = node.setdefault(action_key, [0, 0.0])
+                stats[0] += 1
+                if winner is None:
+                    result = 0.0
+                elif winner == player:
+                    result = 1.0
+                else:
+                    result = -1.0
+                stats[1] += result
 
     def update_from_trajectory(self, history: list[tuple[StateKey, ActionKey, str]], winner: Optional[str]) -> None:
         """Fold a real, already-played game's trajectory into the table

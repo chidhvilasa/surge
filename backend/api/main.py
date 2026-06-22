@@ -187,10 +187,20 @@ def log_move(game_id: str, move: Move, state: GameState) -> None:
 
 
 def _save_policy_in_background(tier_agent: MCTSAgent) -> None:
+    # Snapshot the table's key-set *before* anything else in this task,
+    # per snapshot_table()'s own brief lock -- not while holding save_lock,
+    # and not interleaved with the slow pickle below. Without this,
+    # pickle.dump() iterating the *live* table directly while a concurrent
+    # request's search() was still adding newly-discovered states raised a
+    # real production RuntimeError ("dictionary changed size during
+    # iteration"). save_lock now only serializes the write itself (still
+    # needed: two finished games' saves racing on os.replace() could
+    # otherwise let the one with stale data land last and win).
     t0 = time.time()
+    snapshot = tier_agent.snapshot_table()
+    table_size = len(snapshot)
     with save_lock:
-        table_size = len(tier_agent.table)
-        tier_agent.save()
+        tier_agent.save(table=snapshot)
     print(
         f"[timing] background save ({tier_agent.policy_path}) completed in {time.time() - t0:.3f}s "
         f"(table_size at save time={table_size})",
