@@ -1,6 +1,7 @@
 # Surge
 
 [![Latest release](https://img.shields.io/github/v/release/chidhvilasa/surge?label=latest%20release)](https://github.com/chidhvilasa/surge/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-coming%20soon-lightgrey)](#download)
 
 A 5x6 board strategy game with a self-improving AI opponent: a local Monte
