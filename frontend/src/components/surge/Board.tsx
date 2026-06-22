@@ -56,6 +56,13 @@ export function Board({
     return () => window.removeEventListener("resize", recompute);
   }, []);
 
+  // Visual orientation: B renders at the top, A at the bottom, so the
+  // human's own pieces sit closest to them. board[0]=A / board[5]=B in the
+  // underlying data never changes -- this is a pure display-coordinate
+  // transform. It's its own inverse (a vertical mirror), so the same
+  // function converts board-row -> visual-row and visual-row -> board-row.
+  const flipRow = (r: number) => ROWS - 1 - r;
+
   const boardW = cell * COLS;
   const boardH = cell * ROWS;
 
@@ -98,8 +105,10 @@ export function Board({
   function handleKey(e: React.KeyboardEvent) {
     if (disabled) return;
     let [r, c] = focus;
-    if (e.key === "ArrowUp") r = Math.max(0, r - 1);
-    else if (e.key === "ArrowDown") r = Math.min(ROWS - 1, r + 1);
+    // B (high r) renders visually on top now, so ArrowUp moves toward
+    // higher r and ArrowDown toward lower r -- the reverse of board-row order.
+    if (e.key === "ArrowUp") r = Math.min(ROWS - 1, r + 1);
+    else if (e.key === "ArrowDown") r = Math.max(0, r - 1);
     else if (e.key === "ArrowLeft") c = Math.max(0, c - 1);
     else if (e.key === "ArrowRight") c = Math.min(COLS - 1, c + 1);
     else if (e.key === "Enter" || e.key === " ") {
@@ -151,7 +160,8 @@ export function Board({
           }}
         >
           {Array.from({ length: ROWS * COLS }).map((_, idx) => {
-            const r = Math.floor(idx / COLS);
+            // flipRow converts that visual slot to the real board row.
+            const r = flipRow(Math.floor(idx / COLS));
             const c = idx % COLS;
             const key = `${r},${c}`;
             const isFocus = focus[0] === r && focus[1] === c;
@@ -214,8 +224,8 @@ export function Board({
           {surgeTrail && (
             <SurgeTrail
               key={surgeTrail.key}
-              from={surgeTrail.from}
-              to={surgeTrail.to}
+              from={[flipRow(surgeTrail.from[0]), surgeTrail.from[1]]}
+              to={[flipRow(surgeTrail.to[0]), surgeTrail.to[1]]}
               cell={cell}
               visible
             />
@@ -229,7 +239,7 @@ export function Board({
               <Piece
                 key={p.id}
                 owner={p.owner}
-                row={p.pos[0]}
+                row={flipRow(p.pos[0])}
                 col={p.pos[1]}
                 cell={cell}
                 exposed={isExposed(state, p.pos)}
@@ -243,7 +253,7 @@ export function Board({
           {/* Captured pieces fading out */}
           <AnimatePresence>
             {capturedThisTurn.map((p) => (
-              <CapturedFade key={`cap-${p.id}`} owner={p.owner} row={p.pos[0]} col={p.pos[1]} cell={cell} />
+              <CapturedFade key={`cap-${p.id}`} owner={p.owner} row={flipRow(p.pos[0])} col={p.pos[1]} cell={cell} />
             ))}
           </AnimatePresence>
         </div>
@@ -309,7 +319,9 @@ function CapturedFade({
           style={{
             width: size,
             height: size,
-            background: `radial-gradient(circle at 35% 30%, ${color}ee, ${color}aa 60%, ${color}66 100%)`,
+            // See Piece.tsx for why this can't be `${color}ee` etc. -- var()
+            // doesn't accept a directly-appended alpha hex suffix.
+            background: `radial-gradient(circle at 35% 30%, color-mix(in srgb, ${color} 93%, transparent), color-mix(in srgb, ${color} 67%, transparent) 60%, color-mix(in srgb, ${color} 40%, transparent) 100%)`,
           }}
         />
       </div>

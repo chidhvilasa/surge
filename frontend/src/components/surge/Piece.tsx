@@ -101,7 +101,12 @@ function PieceVisual({
         style={{
           width: size,
           height: size,
-          background: `radial-gradient(circle at 35% 30%, ${color}ee, ${color}aa 60%, ${color}66 100%)`,
+          // color is a var() reference, not a literal hex string -- you
+          // can't append hex alpha digits ("ee"/"aa"/"66") to a var()
+          // call, that produces an invalid color value the browser just
+          // drops, which is why every piece rendered flat gray. color-mix()
+          // is the correct way to blend a var() with alpha.
+          background: `radial-gradient(circle at 35% 30%, color-mix(in srgb, ${color} 93%, transparent), color-mix(in srgb, ${color} 67%, transparent) 60%, color-mix(in srgb, ${color} 40%, transparent) 100%)`,
           boxShadow: winner
             ? "0 0 24px var(--color-victory), 0 0 8px var(--color-victory)"
             : exposed
