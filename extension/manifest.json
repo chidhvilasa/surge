@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Surge",
   "version": "1.0.1",
-  "description": "A 5x6 board strategy game with a self-improving local MCTS opponent. No network calls, no servers -- the agent learns entirely in your browser.",
+  "description": "A 5x6 board strategy game with a self-improving local MCTS opponent. No network calls -- the agent learns entirely in your browser.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
